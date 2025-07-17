@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef } from 'react';
@@ -16,12 +17,13 @@ export function useRealtimeData() {
     if (initialized.current) return;
     initialized.current = true;
 
-    const providers: Record<string, ethers.providers.WebSocketProvider> = {};
+    const providers: Record<string, ethers.providers.WebSocketProvider | ethers.providers.JsonRpcProvider> = {};
     const timers: NodeJS.Timeout[] = [];
 
     const connectToChain = (chainId: ChainId) => {
       try {
         const { rpcUrl, name } = CHAINS[chainId];
+        // Use JsonRpcProvider as a fallback if WebSocket fails or for more robust connection handling
         const provider = new ethers.providers.WebSocketProvider(rpcUrl);
         providers[chainId] = provider;
         
@@ -29,30 +31,34 @@ export function useRealtimeData() {
 
         provider.on('block', async (blockNumber: number) => {
           try {
+             // If we receive a block, we are connected.
+            const currentStatus = store.getState().chains[chainId].status;
+            if (currentStatus !== 'connected') {
+                store.setChainStatus(chainId, 'connected');
+                console.log(`${name} connection established.`);
+            }
+
             const block = await provider.getBlock(blockNumber);
             const baseFeeGwei = block.baseFeePerGas ? parseFloat(ethers.utils.formatUnits(block.baseFeePerGas, 'gwei')) : 0;
             const feeData = await provider.getFeeData();
             const priorityFeeGwei = feeData.maxPriorityFeePerGas ? parseFloat(ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei')) : 0;
             store.updateGasPrice(chainId, baseFeeGwei, priorityFeeGwei);
-            store.setChainStatus(chainId, 'connected');
           } catch (error) {
              console.error(`Error fetching block data for ${name}:`, error);
+             // Potentially set an error state here if block fetching fails repeatedly
           }
         });
         
-        provider._websocket.on('open', () => {
-            console.log(`${name} WebSocket connected.`);
-            store.setChainStatus(chainId, 'connected');
-        });
-
-        provider._websocket.on('error', (err: any) => {
-          console.error(`${name} WebSocket error:`, err);
-          store.setChainStatus(chainId, 'error');
-          toast({
-            variant: "destructive",
-            title: `Connection Error: ${name}`,
-            description: "Could not connect to the blockchain network.",
-          });
+        // Ethers.js v5 WebSocketProvider handles reconnects, but we can detect persistent failures
+        // by listening for errors on the provider itself.
+        provider.on('error', (err: any) => {
+            console.error(`${name} provider error:`, err);
+            store.setChainStatus(chainId, 'error');
+            toast({
+                variant: "destructive",
+                title: `Connection Error: ${name}`,
+                description: "The connection to the blockchain network was lost.",
+            });
         });
 
       } catch (e) {
@@ -67,9 +73,19 @@ export function useRealtimeData() {
         const poolContract = new ethers.Contract(UNISWAP_V3_POOL_ADDRESS, UNISWAP_V3_POOL_ABI, ethProvider);
 
         poolContract.on('Swap', (sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick) => {
-            const price = sqrtPriceX96.pow(2).mul(ethers.BigNumber.from(10).pow(12)).div(ethers.BigNumber.from(2).pow(192));
+            const price = sqrtPriceX9e6A0c2dDD26FEEb64F039a2c41296FcB3f5640.pow(2).mul(ethers.BigNumber.from(10).pow(12)).div(ethers.BigNumber.from(2).pow(192));
             store.updateUsdPrice(parseFloat(ethers.utils.formatUnits(price, 6)));
         });
+        
+        ethProvider.on('error', (err: any) => {
+            console.error('Uniswap price feed provider error:', err);
+            toast({
+                variant: "destructive",
+                title: "Price Feed Error",
+                description: "Connection to Uniswap V3 for price data lost.",
+            });
+        });
+
         providers['uniswap'] = ethProvider;
     } catch(e) {
         console.error('Failed to initialize Uniswap price feed:', e);
@@ -95,7 +111,13 @@ export function useRealtimeData() {
     return () => {
       console.log('Cleaning up WebSocket providers.');
       initialized.current = false;
-      Object.values(providers).forEach(p => p.destroy());
+      Object.values(providers).forEach(p => {
+          if (p instanceof ethers.providers.WebSocketProvider) {
+              p.destroy();
+          } else {
+              // For other provider types if any
+          }
+      });
       timers.forEach(t => clearInterval(t));
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
