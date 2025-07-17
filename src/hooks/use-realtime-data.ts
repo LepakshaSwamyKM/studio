@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 
 export function useRealtimeData() {
   const { toast } = useToast();
-  const store = useChainStore();
+  const { setChainStatus, updateGasPrice, updateUsdPrice, aggregateHistory, setInitialized } = useChainStore();
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -27,14 +27,14 @@ export function useRealtimeData() {
         const provider = new ethers.providers.WebSocketProvider(rpcUrl);
         providers[chainId] = provider;
         
-        store.setChainStatus(chainId, 'connecting');
+        setChainStatus(chainId, 'connecting');
 
         provider.on('block', async (blockNumber: number) => {
           try {
              // If we receive a block, we are connected.
-            const currentStatus = store.getState().chains[chainId].status;
+            const currentStatus = useChainStore.getState().chains[chainId].status;
             if (currentStatus !== 'connected') {
-                store.setChainStatus(chainId, 'connected');
+                setChainStatus(chainId, 'connected');
                 console.log(`${name} connection established.`);
             }
 
@@ -42,7 +42,7 @@ export function useRealtimeData() {
             const baseFeeGwei = block.baseFeePerGas ? parseFloat(ethers.utils.formatUnits(block.baseFeePerGas, 'gwei')) : 0;
             const feeData = await provider.getFeeData();
             const priorityFeeGwei = feeData.maxPriorityFeePerGas ? parseFloat(ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei')) : 0;
-            store.updateGasPrice(chainId, baseFeeGwei, priorityFeeGwei);
+            updateGasPrice(chainId, baseFeeGwei, priorityFeeGwei);
           } catch (error) {
              console.error(`Error fetching block data for ${name}:`, error);
              // Potentially set an error state here if block fetching fails repeatedly
@@ -53,7 +53,7 @@ export function useRealtimeData() {
         // by listening for errors on the provider itself.
         provider.on('error', (err: any) => {
             console.error(`${name} provider error:`, err);
-            store.setChainStatus(chainId, 'error');
+            setChainStatus(chainId, 'error');
             toast({
                 variant: "destructive",
                 title: `Connection Error: ${name}`,
@@ -63,7 +63,7 @@ export function useRealtimeData() {
 
       } catch (e) {
         console.error(`Failed to initialize provider for ${CHAINS[chainId].name}:`, e);
-        store.setChainStatus(chainId, 'error');
+        setChainStatus(chainId, 'error');
       }
     };
     
@@ -74,7 +74,7 @@ export function useRealtimeData() {
 
         poolContract.on('Swap', (sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick) => {
             const price = sqrtPriceX96.pow(2).mul(ethers.BigNumber.from(10).pow(12)).div(ethers.BigNumber.from(2).pow(192));
-            store.updateUsdPrice(parseFloat(ethers.utils.formatUnits(price, 6)));
+            updateUsdPrice(parseFloat(ethers.utils.formatUnits(price, 6)));
         });
         
         ethProvider.on('error', (err: any) => {
@@ -100,12 +100,12 @@ export function useRealtimeData() {
     Object.keys(CHAINS).forEach(id => connectToChain(id as ChainId));
     
     const aggregationTimer = setInterval(() => {
-        store.aggregateHistory();
+        aggregateHistory();
     }, 60 * 1000); // Aggregate every minute
     timers.push(aggregationTimer);
 
     setTimeout(() => {
-        store.setInitialized(true);
+        setInitialized(true);
     }, 3000);
 
     return () => {
