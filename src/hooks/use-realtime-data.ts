@@ -73,7 +73,7 @@ export function useRealtimeData() {
         const poolContract = new ethers.Contract(UNISWAP_V3_POOL_ADDRESS, UNISWAP_V3_POOL_ABI, ethProvider);
 
         poolContract.on('Swap', (sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick) => {
-            const price = sqrtPriceX9e6A0c2dDD26FEEb64F039a2c41296FcB3f5640.pow(2).mul(ethers.BigNumber.from(10).pow(12)).div(ethers.BigNumber.from(2).pow(192));
+            const price = sqrtPriceX96.pow(2).mul(ethers.BigNumber.from(10).pow(12)).div(ethers.BigNumber.from(2).pow(192));
             store.updateUsdPrice(parseFloat(ethers.utils.formatUnits(price, 6)));
         });
         
